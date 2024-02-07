@@ -1,12 +1,16 @@
 package router
 
-import "github.com/gorilla/mux"
+import (
+	"goverse/pkg/middleware"
+
+	"github.com/gorilla/mux"
+)
 
 func NewRouter() *mux.Router {
 	r := mux.NewRouter().StrictSlash(true)
-	// amw := authenticationMiddleware{tokenUsers: make(map[string]string)}
-	// amw.Populate()
-	// r.Use(amw.Middleware)
+	authmw := middleware.AuthTokenMap{Auth: make(map[string]interface{})}
+	authmw.LoadTokens()
+	r.Use(authmw.Middleware)
 	r.Use(mux.CORSMethodMiddleware(r))
 	sr := r.PathPrefix("/v1").Subrouter()
 	for _, route := range routes {

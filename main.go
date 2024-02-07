@@ -1,9 +1,12 @@
 package main
 
-import "fmt"
-
-import "rsc.io/quote"
+import (
+	"goverse/pkg/router"
+	"log"
+	"net/http"
+)
 
 func main() {
-    fmt.Println(quote.Go())
+	r := router.NewRouter()
+	log.Fatal(http.ListenAndServe(":8000", r))
 }

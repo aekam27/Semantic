@@ -5,9 +5,9 @@ import (
 	"goverse/pkg/cache_service"
 	conections "goverse/pkg/connections"
 	util "goverse/pkg/utils"
-	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type AuthTokenMap struct {
@@ -16,42 +16,56 @@ type AuthTokenMap struct {
 
 var redisInitialized *cache_service.RedisCache
 
-func gRedisService(auth *AuthTokenMap) error {
+func gRedisService(auth *AuthTokenMap, stop chan bool, ticker *time.Ticker) error {
+	defer ticker.Stop()
 	if redisInitialized == nil {
 		redisInitialized = cache_service.InitialzeRedis(conections.RedisCacheConn, conections.RedisContext)
 	}
 	tokens, err := redisInitialized.GetRecords("userToken")
 	if err != nil {
+		stop <- true
 		return err
 	}
-	for _, entry := range tokens["data"] {
-		// Access and print the data
-		for key, value := range entry {
-			fmt.Printf("%s: %v\n", key, value)
+	for _, value := range tokens["data"] {
+		if tokenMap, ok := value.(map[string]interface{}); ok {
+			token := tokenMap["token"].(string)
+			expiryTime := tokenMap["exp"].(int64)
+			currentTime := time.Now().Add(time.Minute).Unix()
+			if expiryTime < currentTime {
+				delete(auth.Auth, token)
+				continue
+			}
+			auth.Auth[token] = tokenMap
 		}
 	}
-	for _, value := range tokens["data"] {
-		token := value["token"]
-		auth.Auth[token] = value
-	}
+	stop <- true
 	return nil
 }
 
-func (auth *AuthTokenMap) loadToken() {
-	gRedisService(auth)
+func (auth *AuthTokenMap) LoadTokens() {
+	stop := make(chan bool)
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				gRedisService(auth, stop, ticker)
+			case <-stop:
+				fmt.Println("FIN Stopped")
+				return
+			}
+		}
+	}()
 }
 
-// Middleware function, which will be called for each request
 func (auth *AuthTokenMap) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenString := strings.Split(r.Header.Get("Authorization"), " ")
-
 		//Check for valid token
 		if len(tokenString) < 2 {
 			http.Error(w, "Forbidden", http.StatusUnauthorized)
 			return
 		}
-
 		//Check if token exist in inmemorymap
 		if details, found := auth.Auth[tokenString[1]]; found {
 			claims, err := util.DecodeToken(tokenString[1])
@@ -59,9 +73,18 @@ func (auth *AuthTokenMap) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "Forbidden", http.StatusUnauthorized)
 				return
 			}
+			mDetails := details.(map[string]interface{})
+			currentTime := time.Now().Add(time.Minute).Unix()
+			if mDetails["email"].(string) != claims["email"] {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			if mDetails["exp"].(int64) != claims["exp"] || mDetails["exp"].(int64) < currentTime {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
 			// We found the token in our map
-			log.Printf("Authenticated user %s\n", user)
-			// Pass down the request to the next middleware (or final handler)
+			fmt.Println("Authenticated user", "AKM", mDetails)
 			next.ServeHTTP(w, r)
 		} else {
 			http.Error(w, "Forbidden", http.StatusForbidden)

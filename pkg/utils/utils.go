@@ -16,7 +16,12 @@ func gsRedisService(email, token string, exp int64) error {
 	}
 	tokens, err := redisInitialized.GetRecords("userToken")
 	if err != nil {
-		return err
+		if err.Error() == "cache: key is missing" {
+			tokens = make(map[string][]interface{})
+			tokens["data"] = []interface{}{}
+		} else {
+			return err
+		}
 	}
 	putObj := &map[string]interface{}{"email": email, "hotlisted": false, "token": token, "exp": exp}
 	tokens["data"] = append(tokens["data"], *putObj)

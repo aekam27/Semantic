@@ -17,7 +17,6 @@ func init() {
 	ring := redis.NewRing(&redis.RingOptions{
 		Addrs: map[string]string{
 			"server1": ":6379",
-			"server2": ":6380",
 		},
 	})
 

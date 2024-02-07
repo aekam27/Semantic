@@ -17,13 +17,13 @@ type AuthTokenMap struct {
 var redisInitialized *cache_service.RedisCache
 
 func gRedisService(auth *AuthTokenMap, stop chan bool, ticker *time.Ticker) error {
-	defer ticker.Stop()
 	if redisInitialized == nil {
 		redisInitialized = cache_service.InitialzeRedis(conections.RedisCacheConn, conections.RedisContext)
 	}
 	tokens, err := redisInitialized.GetRecords("userToken")
 	if err != nil {
 		stop <- true
+		defer ticker.Stop()
 		return err
 	}
 	for _, value := range tokens["data"] {
@@ -38,13 +38,12 @@ func gRedisService(auth *AuthTokenMap, stop chan bool, ticker *time.Ticker) erro
 			auth.Auth[token] = tokenMap
 		}
 	}
-	stop <- true
 	return nil
 }
 
 func (auth *AuthTokenMap) LoadTokens() {
 	stop := make(chan bool)
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		for {
 			select {
@@ -79,7 +78,7 @@ func (auth *AuthTokenMap) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
-			if mDetails["exp"].(int64) != claims["exp"] || mDetails["exp"].(int64) < currentTime {
+			if mDetails["exp"].(int64) != int64(claims["exp"].(float64)) || mDetails["exp"].(int64) < currentTime {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}

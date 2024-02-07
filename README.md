@@ -1,8 +1,9 @@
-# go
+# Folsyfy
  
 #TODO
-Test Cases
-Elastic Search
-Semantic Search using Elastic
-Rate Limiter
-Remove Dependency on cmd to execute python code
+<br/>
+1. Test Cases<br/>
+2. Elastic Search<br/>
+3. Semantic Search using Elastic<br/>
+4. Rate Limiter<br/>
+5. Remove Dependency on cmd to execute python code<br/>

@@ -42,8 +42,12 @@ func MongoVectorSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error", http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(bson.M{"data": result})
+	jsonString, err := json.Marshal(bson.M{"data": result})
+	if err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+	util.GZIPResp(w, jsonString)
 }
 
 type MongoVector struct {

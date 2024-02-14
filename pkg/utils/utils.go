@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"goverse/pkg/cache_service"
 	conections "goverse/pkg/connections"
@@ -80,4 +81,22 @@ func PostApi(url string, doc interface{}) ([]byte, error) {
 	}
 	defer res.Body.Close()
 	return io.ReadAll(res.Body)
+}
+
+func GZIPResp(w http.ResponseWriter, respData []byte) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err := gz.Write(respData)
+	if err != nil {
+		http.Error(w, "Failed to compress the content", http.StatusInternalServerError)
+		return
+	}
+	if err := gz.Close(); err != nil {
+		http.Error(w, "Failed to close the gzip writer", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf.Bytes())
 }

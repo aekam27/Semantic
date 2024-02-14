@@ -6,4 +6,4 @@
 2. Elastic Search<br/>
 3. Semantic Search using Elastic<br/>
 4. Rate Limiter<br/>
-5. Remove Dependency on cmd to execute python code<br/>
+5. <s>Remove Dependency on cmd to execute python code.</s><br/>

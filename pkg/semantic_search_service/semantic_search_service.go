@@ -3,12 +3,10 @@ package semantic_search_service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"goverse/pkg/dao"
+	util "goverse/pkg/utils"
 	"io"
 	"net/http"
-	"os/exec"
-	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -28,16 +26,13 @@ func MongoVectorSearch(w http.ResponseWriter, r *http.Request) {
 
 	mongoDAO := dao.InitializeMongoDAO("vectormap")
 	ctx := context.TODO()
-	cmd := exec.Command("python", "-c", "import vector_embedding; print(vector_embedding.generate_embedding())", details.Text)
-	out, err := cmd.CombinedOutput()
+	embeddingResp, err := util.PostApi("http://localhost:8000/v1/vectorEmbeddings/", map[string]string{"name": details.Text})
 	if err != nil {
-		fmt.Println("Error running Python script:", err)
 		http.Error(w, "Server error", http.StatusInternalServerError)
 		return
 	}
-	cmdStrOP := strings.Split(string(out), "cmd_op_str_trans_:")[1]
 	var vectorData map[string]bson.A
-	err = json.Unmarshal([]byte(cmdStrOP), &vectorData)
+	err = json.Unmarshal(embeddingResp, &vectorData)
 	if err != nil {
 		http.Error(w, "Server error", http.StatusInternalServerError)
 		return

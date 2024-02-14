@@ -1,8 +1,12 @@
 package util
 
 import (
+	"bytes"
+	"encoding/json"
 	"goverse/pkg/cache_service"
 	conections "goverse/pkg/connections"
+	"io"
+	"net/http"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -56,4 +60,24 @@ func DecodeToken(tok string) (jwt.MapClaims, error) {
 		return claims, err
 	}
 	return claims, nil
+}
+
+func PostApi(url string, doc interface{}) ([]byte, error) {
+	method := "POST"
+	requestByte, err := json.Marshal(doc)
+	if err != nil {
+		return []byte{}, err
+	}
+	requestReader := bytes.NewReader(requestByte)
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, requestReader)
+	if err != nil {
+		return []byte{}, err
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return []byte{}, err
+	}
+	defer res.Body.Close()
+	return io.ReadAll(res.Body)
 }

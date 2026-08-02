@@ -22,3 +22,13 @@ go.work
 
 
 *.pyc
+# Local environment
+.env
+
+# Python
+__pycache__/
+.venv/
+venv/
+
+# Coverage
+coverage.out

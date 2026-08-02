@@ -1,55 +1,34 @@
+// Package semantic_search_service serves vector similarity queries.
 package semantic_search_service
 
 import (
-	"context"
 	"encoding/json"
-	"goverse/pkg/dao"
-	util "goverse/pkg/utils"
-	"io"
+	"log"
 	"net/http"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
+
+	"github.com/aekam27/Semantic/pkg/dao"
+	util "github.com/aekam27/Semantic/pkg/utils"
 )
 
-func MongoVectorSearch(w http.ResponseWriter, r *http.Request) {
-	details, err := UnmarshalMVPayload(r)
-	if err != nil {
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		json.NewEncoder(w).Encode(bson.M{"rep": []string{}})
-		return
-	}
+// maxBodyBytes caps the search payload we are willing to read.
+const maxBodyBytes = 1 << 16 // 64 KiB
 
-	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-
-	mongoDAO := dao.InitializeMongoDAO("vectormap")
-	ctx := context.TODO()
-	embeddingResp, err := util.PostApi("http://localhost:8000/v1/vectorEmbeddings/", map[string]string{"name": details.Text})
-	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-	var vectorData map[string]bson.A
-	err = json.Unmarshal(embeddingResp, &vectorData)
-	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-	result, err := mongoDAO.VectorFind(details.SearchIndex, details.Path, details.Project, details.Limit, vectorData["vector_embedding"], ctx)
-	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-	jsonString, err := json.Marshal(bson.M{"data": result})
-	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-	util.GZIPResp(w, jsonString)
+// Handler serves the vector search endpoint.
+type Handler struct {
+	dao          dao.MongoDAO
+	embeddingURL string
+	client       *http.Client
 }
 
+// NewHandler builds the search handler.
+func NewHandler(mongoDAO dao.MongoDAO, embeddingURL string, client *http.Client) *Handler {
+	return &Handler{dao: mongoDAO, embeddingURL: embeddingURL, client: client}
+}
+
+// MongoVector is the request payload for a vector search.
 type MongoVector struct {
 	SearchIndex string `json:"searchIndex,omitempty"`
 	Path        string `json:"path,omitempty"`
@@ -58,12 +37,63 @@ type MongoVector struct {
 	Limit       int64  `json:"limit,omitempty"`
 }
 
-func UnmarshalMVPayload(r *http.Request) (MongoVector, error) {
-	var user MongoVector
-	body, _ := io.ReadAll(r.Body)
-	err := json.Unmarshal(body, &user)
+// MongoVectorSearch embeds the query text and returns the nearest documents.
+func (h *Handler) MongoVectorSearch(w http.ResponseWriter, r *http.Request) {
+	details, err := decodePayload(r)
 	if err != nil {
-		return user, err
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
 	}
-	return user, err
+	if strings.TrimSpace(details.Text) == "" {
+		http.Error(w, "text is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	embeddingResp, err := util.PostJSON(ctx, h.client, h.embeddingURL, map[string]string{"name": details.Text})
+	if err != nil {
+		log.Printf("search: embedding service: %v", err)
+		http.Error(w, "Server error", http.StatusBadGateway)
+		return
+	}
+
+	var vectorData map[string]bson.A
+	if err := json.Unmarshal(embeddingResp, &vectorData); err != nil {
+		log.Printf("search: decode embedding response: %v", err)
+		http.Error(w, "Server error", http.StatusBadGateway)
+		return
+	}
+
+	result, err := h.dao.VectorFind(ctx, dao.VectorSearch{
+		SearchIndex: details.SearchIndex,
+		Path:        details.Path,
+		Project:     details.Project,
+		Limit:       details.Limit,
+		QueryVector: vectorData["vector_embedding"],
+	})
+	if err != nil {
+		log.Printf("search: vector find: %v", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	jsonString, err := json.Marshal(bson.M{"data": result})
+	if err != nil {
+		log.Printf("search: marshal results: %v", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	util.GZIPResp(w, jsonString)
+}
+
+func decodePayload(r *http.Request) (MongoVector, error) {
+	var payload MongoVector
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return MongoVector{}, err
+	}
+	return payload, nil
 }

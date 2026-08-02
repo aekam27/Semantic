@@ -1,30 +1,27 @@
-package conections
+package connections
 
 import (
-	"context"
 	"time"
 
 	"github.com/go-redis/cache/v9"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/aekam27/Semantic/pkg/config"
 )
 
-var (
-	RedisCacheConn *cache.Cache
-	RedisContext   context.Context
-)
-
-func init() {
+// NewRedisCache builds the token cache client.
+//
+// go-redis dials lazily, so this cannot fail here; a bad address surfaces on
+// the first cache operation.
+func NewRedisCache(cfg config.RedisConfig) *cache.Cache {
 	ring := redis.NewRing(&redis.RingOptions{
 		Addrs: map[string]string{
-			"server1": ":6379",
+			"server1": cfg.Addr,
 		},
 	})
 
-	rc := cache.New(&cache.Options{
+	return cache.New(&cache.Options{
 		Redis:      ring,
 		LocalCache: cache.NewTinyLFU(1000, time.Minute),
 	})
-	ctx := context.TODO()
-	RedisCacheConn = rc
-	RedisContext = ctx
 }

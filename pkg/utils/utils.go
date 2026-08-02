@@ -1,93 +1,53 @@
+// Package util holds small HTTP helpers shared by the services.
 package util
 
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
-	"goverse/pkg/cache_service"
-	conections "goverse/pkg/connections"
+	"fmt"
 	"io"
 	"net/http"
-	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
-var redisInitialized *cache_service.RedisCache
+// maxResponseBytes caps how much an upstream service can make us buffer.
+const maxResponseBytes = 32 << 20 // 32 MiB
 
-func gsRedisService(email, token string, exp int64) error {
-	if redisInitialized == nil {
-		redisInitialized = cache_service.InitialzeRedis(conections.RedisCacheConn, conections.RedisContext)
-	}
-	tokens, err := redisInitialized.GetRecords("userToken")
+// PostJSON posts doc as JSON to url and returns the response body.
+//
+// The caller's context governs the request, so a slow embedding service cannot
+// pin a request goroutine indefinitely.
+func PostJSON(ctx context.Context, client *http.Client, url string, doc interface{}) ([]byte, error) {
+	requestBytes, err := json.Marshal(doc)
 	if err != nil {
-		if err.Error() == "cache: key is missing" {
-			tokens = make(map[string][]interface{})
-			tokens["data"] = []interface{}{}
-		} else {
-			return err
-		}
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	putObj := &map[string]interface{}{"email": email, "hotlisted": false, "token": token, "exp": exp}
-	tokens["data"] = append(tokens["data"], *putObj)
-	err = redisInitialized.PutRecords("userToken", tokens)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
-func GenerateToken(userid, email, name, status string) (string, error) {
-	claims := jwt.MapClaims{}
-	claims["authorized"] = true
-	claims["email"] = email
-	exp := time.Now().Add(time.Minute * 15).Unix()
-	claims["exp"] = exp
-	at := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	token, err := at.SignedString([]byte("tokensecret"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(requestBytes))
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
-	_ = gsRedisService(email, token, exp)
-	return token, nil
-}
+	req.Header.Set("Content-Type", "application/json")
 
-func DecodeToken(tok string) (jwt.MapClaims, error) {
-	claims := jwt.MapClaims{}
-	_, err := jwt.ParseWithClaims(tok, claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte("tokensecret"), nil
-	})
-	if err != nil {
-		return claims, err
-	}
-	return claims, nil
-}
-
-func PostApi(url string, doc interface{}) ([]byte, error) {
-	method := "POST"
-	requestByte, err := json.Marshal(doc)
-	if err != nil {
-		return []byte{}, err
-	}
-	requestReader := bytes.NewReader(requestByte)
-	client := &http.Client{}
-	req, err := http.NewRequest(method, url, requestReader)
-	if err != nil {
-		return []byte{}, err
-	}
 	res, err := client.Do(req)
 	if err != nil {
-		return []byte{}, err
+		return nil, fmt.Errorf("call %s: %w", url, err)
 	}
 	defer res.Body.Close()
-	return io.ReadAll(res.Body)
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("call %s: unexpected status %s", url, res.Status)
+	}
+
+	return io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
 }
 
+// GZIPResp writes respData to w as a gzipped JSON response.
 func GZIPResp(w http.ResponseWriter, respData []byte) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
-	_, err := gz.Write(respData)
-	if err != nil {
+	if _, err := gz.Write(respData); err != nil {
 		http.Error(w, "Failed to compress the content", http.StatusInternalServerError)
 		return
 	}
@@ -95,8 +55,12 @@ func GZIPResp(w http.ResponseWriter, respData []byte) {
 		http.Error(w, "Failed to close the gzip writer", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Encoding", "gzip")
 	w.WriteHeader(http.StatusOK)
-	w.Write(buf.Bytes())
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		// The header is already out; nothing left to do but stop.
+		return
+	}
 }

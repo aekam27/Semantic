@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # Honours the go directive in go.mod, which pins a patch release
+          # carrying the current standard library security fixes.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Scan for known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python_server
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python_server/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check the app imports cleanly
+        run: python -c "import app"

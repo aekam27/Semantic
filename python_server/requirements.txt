@@ -3,6 +3,6 @@
 # Compatible-release pins (~=) so patch updates land automatically while a
 # breaking major stays an explicit decision.
 fastapi~=0.141.1
-uvicorn[standard]~=0.52.1
+uvicorn[standard]~=0.52.3
 pydantic~=2.13.4
 sentence-transformers~=5.6.1
